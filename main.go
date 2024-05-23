@@ -1,49 +1,27 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/html"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer/html"
 )
-
-var server *http.Server
 
 //go:embed static/github.css
 var githubCSS string
 
 func main() {
-	server = &http.Server{Addr: ":6969"}
+	server := &http.Server{Addr: ":6969"}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		requestedPath := r.URL.Path
-
-		if requestedPath == "/" {
-			filePath := "./index.md"
-			serveMarkdownFile(filePath, w, r)
-			return
-		}
-
-		requestedPath = strings.TrimPrefix(requestedPath, "/")
-		requestedPath = strings.TrimSuffix(requestedPath, "/")
-
-		fileInfo, err := os.Stat(requestedPath)
-		if err == nil && fileInfo.IsDir() {
-			filePath := filepath.Join(requestedPath, "index.md")
-			serveMarkdownFile(filePath, w, r)
-			return
-		}
-
-		requestedPath += ".md"
-
-		filePath := filepath.Join(".", requestedPath)
-		serveMarkdownFile(filePath, w, r)
+		serveMarkdownFile("."+r.URL.Path, w, r)
 	})
 
 	log.Println("Starting server on http://localhost:6969")
@@ -53,7 +31,8 @@ func main() {
 }
 
 func serveMarkdownFile(filePath string, w http.ResponseWriter, r *http.Request) {
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(filePath)
+	if os.IsNotExist(err) || fileInfo.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
@@ -70,15 +49,26 @@ func serveMarkdownFile(filePath string, w http.ResponseWriter, r *http.Request) 
 }
 
 func convertMarkdownToHTML(mdContent []byte) []byte {
-	opts := html.RendererOptions{
-		Flags: html.CommonFlags,
+	var buf bytes.Buffer
+
+	md := goldmark.New(
+		goldmark.WithExtensions(
+			extension.GFM,
+		),
+		goldmark.WithParserOptions(
+			parser.WithAutoHeadingID(),
+		),
+		goldmark.WithRendererOptions(
+			html.WithHardWraps(),
+			html.WithXHTML(),
+		),
+	)
+
+	if err := md.Convert(mdContent, &buf); err != nil {
+		log.Fatalf("Error converting markdown to HTML: %v", err)
 	}
 
-	renderer := html.NewRenderer(opts)
-
-	htmlContent := markdown.ToHTML(mdContent, nil, renderer)
-
-	htmlWithCSS := fmt.Sprintf("<style>%s</style>\n%s", githubCSS, htmlContent)
-
+	htmlWithCSS := fmt.Sprintf("<style>%s</style>\n%s", githubCSS, buf.String())
 	return []byte(htmlWithCSS)
 }
+
