@@ -1,6 +1,6 @@
-local M = require("markdownserve")
+local M = {}
 
-function M.init()
+function M.hello()
 	print("Plugin is ready to work")
 end
 
